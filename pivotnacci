@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import argparse
+import logging
+from pivotnaccilib.server import SocksServer
+from pivotnaccilib.agent import AgentFactory, AgentError, \
+    AgentConnectionDispatcher, AgentOptions
+from threading import Thread
+
+logger = logging.getLogger(__name__)
+
+ACK_MESSAGE = "Server Error 500 (Internal Error)"
+AGENT_PASSWORD = ""
+DEFAULT_PORT = 1080
+DEFAULT_ADDRESS = "127.0.0.1"
+POLLING_INTERVAL = 100
+RETRY_INTERVAL = 100
+USER_AGENT = "pivotnacci/0.0.1"
+RETRIES = 50
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Socks server for HTTP agents",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument(
+        "-s", "--source",
+        metavar="addr",
+        dest="addr",
+        help="The default listening address",
+        default=DEFAULT_ADDRESS
+    )
+
+    parser.add_argument(
+        "-p", "--port",
+        metavar="port",
+        help="The default listening port",
+        type=int,
+        default=DEFAULT_PORT
+    )
+
+    parser.add_argument(
+        "url",
+        help="The url of the agent"
+    )
+
+    parser.add_argument(
+        "--verbose", "-v",
+        action="count",
+        default=0,
+    )
+
+    parser.add_argument(
+        "--ack-message", "-a",
+        metavar="message",
+        help="Message returned by the agent web page",
+        default=ACK_MESSAGE
+    )
+
+    parser.add_argument(
+        "--password",
+        metavar="password",
+        help="Password to communicate with the agent",
+        default=AGENT_PASSWORD
+    )
+
+    parser.add_argument(
+        "--user-agent", "-A",
+        metavar="user_agent",
+        help="The User-Agent header sent to the agent",
+        default=USER_AGENT
+    )
+
+    parser.add_argument(
+        "--header", "-H",
+        metavar="header",
+        dest="headers",
+        help="Send custom header. Specify in the form 'Name: Value'",
+        action="append",
+        type=header_type
+    )
+
+    parser.add_argument(
+        "--proxy", "-x",
+        metavar="[protocol://]host[:port]",
+        help="Set the HTTP proxy to use."
+        "(Environment variables HTTP_PROXY and HTTPS_PROXY are also supported)"
+    )
+
+    parser.add_argument(
+        "--type", "-t",
+        metavar="type",
+        choices=AgentFactory.TYPES,
+        help="To specify agent type in case is not automatically detected. " +
+        "Options are {}".format(AgentFactory.TYPES)
+    )
+
+    parser.add_argument(
+        "--polling-interval",
+        metavar="milliseconds",
+        help="Interval to poll the agents (for recv operations)",
+        type=int,
+        default=POLLING_INTERVAL
+    )
+
+    parser.add_argument(
+        "--request-tries",
+        metavar="number",
+        help="The number of retries for each request to an agent. "
+        "To use in case of balanced servers",
+        type=int,
+        default=RETRIES
+    )
+
+    parser.add_argument(
+        "--retry-interval",
+        metavar="milliseconds",
+        help="Interval to retry a failure request (due a balanced server)",
+        type=int,
+        default=RETRY_INTERVAL
+    )
+
+    args = parser.parse_args()
+
+    if args.verbose > 1:
+        args.log_level = logging.DEBUG
+    elif args.verbose > 0:
+        args.log_level = logging.INFO
+    else:
+        args.log_level = None
+
+    if not args.type:
+        for agent_type in AgentFactory.TYPES:
+            if args.url.endswith(agent_type):
+                args.type = agent_type
+
+    # to seconds
+    args.polling_interval = args.polling_interval / 1000
+    args.retry_interval = args.retry_interval / 1000
+
+    headers = {
+        "User-Agent": args.user_agent
+    }
+    if args.headers:
+        for name, value in args.headers:
+            headers[name] = value
+
+    args.headers = headers
+
+    args.proxies = {}
+    if args.proxy:
+        args.proxies = {
+            "http": args.proxy,
+            "https": args.proxy
+        }
+
+    return args
+
+
+def header_type(header):
+    parts = header.split(":")
+    if len(parts) < 2:
+        raise argparse.ArgumentTypeError(
+            "'{}' is not a valid header, specify in format 'Name: Value'".format(
+                header
+            ))
+
+    name = parts[0]
+    value = (":".join(parts[1:])).lstrip()
+
+    if name == "" or value == "":
+        raise argparse.ArgumentTypeError(
+            "'{}' is not a valid header, specify in format 'Name: Value'".format(
+                header
+            ))
+
+    return (name, value)
+
+
+def main():
+    args = parse_args()
+
+    logging.basicConfig(level=args.log_level,
+                        format="%(levelname)s:%(name)s:%(message)s")
+
+    agent_options = AgentOptions(
+        url=args.url,
+        ack_message=args.ack_message,
+        headers=args.headers,
+        proxies=args.proxies,
+        request_tries=args.request_tries,
+        retry_interval=args.retry_interval,
+        password=args.password
+    )
+
+    try:
+        agent_broker = AgentFactory.create(args.type, agent_options)
+    except AgentError as ex:
+        logger.error("%s", ex)
+        return
+
+    try:
+        agent_session = agent_broker.get_session()
+    except AgentError as ex:
+        logger.error("%s", ex)
+        return
+
+    logger.info(
+        "Agent in %s returned the following session %s",
+        agent_options.url,
+        agent_session
+    )
+
+    execute_server(
+        args.addr,
+        args.port,
+        AgentConnectionDispatcher(agent_broker, agent_session),
+        args.polling_interval
+    )
+
+
+def execute_server(
+        addr,
+        port,
+        agent_connection_dispatcher,
+        agent_polling_interval
+):
+    logger.info("Socks server => %s:%s", addr, port)
+    socks_server = SocksServer(
+        addr,
+        port,
+        agent_connection_dispatcher,
+        agent_polling_interval
+    )
+    try:
+        server_thread = Thread(target=socks_server.serve_forever)
+        server_thread.start()
+        server_thread.join()
+    except KeyboardInterrupt:
+        logger.info("Sending shutdown signal to server")
+        socks_server.shutdown()
+    finally:
+        logger.info("Closing socks server")
+        socks_server.server_close()
+        logger.info("Server closed")
+
+
+if __name__ == '__main__':
+    main()
