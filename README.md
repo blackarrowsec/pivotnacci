@@ -127,7 +127,7 @@ Eloy Pérez ([@Zer1t0](https://github.com/Zer1t0)) [ [www.blackarrow.net](http:/
 
 License
 -------
-All the code included in this project is licensed under the terms of the CC BY-NC-SA 4.0 license.
+All the code included in this project is licensed under the terms of the GNU AGPLv3 license.
 
 #
 
