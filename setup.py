@@ -10,7 +10,7 @@ name = "pivotnacci"
 
 setuptools.setup(
     name=name,
-    version="0.0.1",
+    version="0.0.2",
     author="Eloy Perez",
     author_email="eloy.perez@tarlogic.com",
     description="A tool to make socks connections through HTTP agents",
