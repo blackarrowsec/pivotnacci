@@ -2,7 +2,9 @@
 
 ini_set("allow_url_fopen", true);
 ini_set("allow_url_include", true);
-apache_setenv('no-gzip', 1);
+if (function_exists('apache_setenv')) {
+    apache_setenv('no-gzip', 1);
+}
 error_reporting(E_ERROR | E_PARSE);
 
 if( !function_exists('apache_request_headers') ) {
