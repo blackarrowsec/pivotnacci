@@ -67,7 +67,8 @@ function main() {
         $RECV_OPERATION, $SEND_OPERATION, $ID_HEADER, $PASSWORD_HEADER, $AGENT_PASSWORD;
 
     set_time_limit(0);
-	$headers=apache_request_headers();
+    $headers=apache_request_headers();
+    $headers=array_change_key_case($headers, CASE_UPPER);
 	$cmd = $headers[$OPERATION_HEADER];
     $password = $headers[$PASSWORD_HEADER];
 
